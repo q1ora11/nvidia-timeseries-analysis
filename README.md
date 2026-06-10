@@ -1,6 +1,5 @@
 # Анализ временных рядов: NVIDIA Daily Stock Prices
 
-Курсовой проект по дисциплине **«Введение в проектную деятельность»**  
 Раздел: Анализ временных рядов  
 Задача: **Прогнозирование стоимости акций**
 
@@ -8,22 +7,6 @@
 
 [NVIDIA Daily Stock Prices 2016–2026](https://www.kaggle.com/datasets/ibrahimshahrukh/nvidia-daily-stock-prices-20162026-dataset/data) — 2514 торговых дней, 5 каналов: Close, High, Low, Open, Volume.
 
-## Структура репозитория
-
-```
-├── analysis.py                          # Основной скрипт анализа (этапы 1–7)
-├── data/
-│   └── NVDA_yfinance_clean.csv          # Исходный датасет
-├── outputs/
-│   ├── stage2_visualization.png         # Этап 2: визуализация исходных данных
-│   ├── stage4_boxplots.png              # Этап 4: диаграммы размаха (выбросы)
-│   ├── stage5_ranges.png                # Этап 5: сравнение диапазонов
-│   ├── stage6_correlation.png           # Этап 6: тепловая карта корреляций
-│   ├── stage7_decomposition.png         # Этап 7: декомпозиция ряда
-│   └── stage7_residuals_hist.png        # Этап 7: гистограмма остатков
-└── report/
-    └── Отчёт_Анализ_временных_рядов_NVIDIA.docx  # Отчёт в формате Word
-```
 
 ## Этапы анализа
 
