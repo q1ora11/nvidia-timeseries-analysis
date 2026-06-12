@@ -1,0 +1,284 @@
+FILE_SKATERS = "SKATERS.csv"
+FILE_GOALIES = "GOALIES.csv"
+
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib
+import seaborn as sns
+import plotly.express as px
+import plotly.graph_objects as go
+from scipy import stats
+
+matplotlib.rcParams['font.family'] = 'DejaVu Sans'
+
+# загрузка
+skaters = pd.read_csv(FILE_SKATERS)
+goalies = pd.read_csv(FILE_GOALIES)
+
+print(f"skaters: {skaters.shape}, goalies: {goalies.shape}")
+print(skaters.columns.tolist())
+
+# смотрим что внутри
+print(skaters.head(3))
+print(skaters.info())
+
+print("пропуски skaters:")
+print(skaters.isnull().sum())
+print("пропуски goalies:")
+print(goalies.isnull().sum())
+
+# гистограммы числовых признаков
+numeric_cols = skaters.select_dtypes(include=[np.number]).columns.tolist()
+
+fig, axes = plt.subplots(2, 3, figsize=(15, 10))
+axes = axes.ravel()
+
+for i, col in enumerate(numeric_cols[:6]):
+    data = skaters[col].dropna()
+    axes[i].hist(data, bins=30, edgecolor='black', alpha=0.7, color='steelblue')
+    axes[i].set_title(col, fontsize=12)
+    axes[i].set_xlabel(col)
+    axes[i].set_ylabel('Частота')
+    med = data.median()
+    axes[i].axvline(med, color='red', linestyle='--', label=f'Медиана: {med:.1f}')
+    axes[i].legend()
+
+for j in range(i + 1, 6):
+    axes[j].set_visible(False)
+
+plt.tight_layout()
+plt.savefig('distributions.png', dpi=150)
+plt.show()
+
+# seaborn — три пары признаков
+fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+
+sns.scatterplot(data=skaters, x='first', y='last', alpha=0.4, ax=axes[0])
+axes[0].set_title('first vs last')
+
+# берём топ-5 имён (там несколько однофамильцев)
+top_names = skaters['name'].value_counts().head(5).index
+skaters_top = skaters[skaters['name'].isin(top_names)]
+
+sns.boxplot(data=skaters_top, x='name', y='first', ax=axes[1])
+axes[1].set_title('first по именам')
+axes[1].tick_params(axis='x', rotation=30)
+
+sns.violinplot(data=skaters_top, x='name', y='last', ax=axes[2])
+axes[2].set_title('last по именам (violin)')
+axes[2].tick_params(axis='x', rotation=30)
+
+plt.tight_layout()
+plt.savefig('seaborn_plots.png', dpi=150)
+plt.show()
+
+# plotly — интерактивные графики
+fig_scatter = px.scatter(
+    skaters, x='first', y='last',
+    title='first vs last',
+    opacity=0.6
+)
+fig_scatter.write_html('interactive_scatter.html')
+
+fig_hist = px.histogram(
+    skaters, x='first', nbins=50,
+    title='Распределение first'
+)
+fig_hist.write_html('interactive_histogram.html')
+
+# обработка пропусков в time
+# пробовал просто удалять строки — теряется ~12%, решил заполнять медианой по позиции
+print("пропуски до:", skaters['time'].isnull().sum())
+
+if skaters['time'].isnull().sum() > 0:
+    median_by_position = skaters.groupby('position')['time'].median()
+    print(median_by_position)
+
+    def fill_time(row):
+        if pd.isnull(row['time']):
+            pos_median = median_by_position.get(row['position'], np.nan)
+            if pd.isnull(pos_median):
+                return skaters['time'].median()
+            return pos_median
+        return row['time']
+
+    skaters['time'] = skaters.apply(fill_time, axis=1)
+    print("пропуски после:", skaters['time'].isnull().sum())
+
+# тепловые карты
+numeric_cols = skaters.select_dtypes(include=[np.number]).columns.tolist()
+skaters_raw = pd.read_csv(FILE_SKATERS)
+numeric_cols_raw = skaters_raw.select_dtypes(include=[np.number]).columns.tolist()
+
+fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+
+sns.heatmap(skaters[numeric_cols].corr(), annot=True, fmt='.2f',
+            cmap='coolwarm', ax=axes[0], linewidths=0.5)
+axes[0].set_title('Корреляционная матрица')
+
+# Спирмен — 
+corr_spearman = skaters[numeric_cols].corr(method='spearman')
+sns.heatmap(corr_spearman, annot=True, fmt='.2f',
+            cmap='coolwarm', ax=axes[1], linewidths=0.5)
+axes[1].set_title('Корреляция Спирмена')
+
+# дубликаты
+before = len(skaters)
+print(f"полных дубликатов: {skaters.duplicated().sum()}")
+print(f"дубликатов по name/first/last: {skaters.duplicated(subset=['name', 'first', 'last']).sum()}")
+skaters = skaters.drop_duplicates()
+print(f"удалено строк: {before - len(skaters)}")
+
+# выбросы по IQR
+for col in ['first', 'last', 'games']:
+    q1 = skaters[col].quantile(0.25)
+    q3 = skaters[col].quantile(0.75)
+    iqr = q3 - q1
+    lo, hi = q1 - 1.5 * iqr, q3 + 1.5 * iqr
+    out = skaters[(skaters[col] < lo) | (skaters[col] > hi)]
+    print(f"{col}: {len(out)} выбросов (границы [{lo:.1f}; {hi:.1f}])")
+
+# выбросы не удаляем — это реальные рекордсмены типа Гретцки
+
+# фильтрация — три варианта
+threshold_90 = skaters['first'].quantile(0.9)
+filter1 = skaters[skaters['first'] > threshold_90]
+print(f"filter1 (first > {threshold_90:.0f}): {len(filter1)} записей")
+
+mean_first = skaters['first'].mean()
+mean_last = skaters['last'].mean()
+filter2 = skaters[(skaters['first'] > mean_first) & (skaters['last'] > mean_last)]
+print(f"filter2 (first и last выше среднего): {len(filter2)} записей")
+
+most_common_pos = skaters['position'].value_counts().index[0]
+filter3 = skaters[skaters['position'] == most_common_pos]
+print(f"filter3 (position == '{most_common_pos}'): {len(filter3)} записей")
+
+# добавляем шум к first и last (1% от std)
+np.random.seed(42)
+noise1 = np.random.normal(0, skaters['first'].std() * 0.01, len(skaters))
+noise2 = np.random.normal(0, skaters['last'].std() * 0.01, len(skaters))
+
+skaters['first_noisy'] = skaters['first'] + noise1
+skaters['last_noisy'] = skaters['last'] + noise2
+
+print(f"шум first: std={noise1.std():.4f}, шум last: std={noise2.std():.4f}")
+
+# числовой признак -> категориальный (десятилетие дебюта)
+skaters['decade'] = (skaters['first'] // 10 * 10).astype(int).astype(str) + 's'
+print(skaters['decade'].value_counts().sort_index())
+
+goalies['decade'] = (goalies['first'] // 10 * 10).astype(int).astype(str) + 's'
+
+# унификация позиций — комбинированные типа C/LW сводим к одной
+print("до унификации:")
+print(skaters['position'].value_counts())
+
+def unify_position(pos):
+    if 'C' in pos:
+        return 'C'
+    elif 'LW' in pos or 'RW' in pos:
+        return 'W'
+    return pos
+
+skaters['position_unified'] = skaters['position'].apply(unify_position)
+print("после:")
+print(skaters['position_unified'].value_counts())
+
+# булевы в числовые
+for col in ['active', 'hof']:
+    if skaters[col].dtype == bool or skaters[col].dtype == object:
+        skaters[col] = skaters[col].map({True: 1, False: 0, 'True': 1, 'False': 0})
+
+# сравниваем распределения до и после фильтра goals > 100
+skaters_filtered = skaters[skaters['goals'] > 100].copy()
+print(f"всего: {len(skaters)}, после фильтра: {len(skaters_filtered)}")
+
+cols_to_compare = ['first', 'last', 'games']
+fig, axes = plt.subplots(1, 3, figsize=(15, 4))
+
+for i, col in enumerate(cols_to_compare):
+    axes[i].hist(skaters[col], bins=30, alpha=0.6, label='все', color='steelblue')
+    axes[i].hist(skaters_filtered[col], bins=30, alpha=0.6, label='goals>100', color='salmon')
+    axes[i].set_title(col)
+    axes[i].set_xlabel(col)
+    axes[i].set_ylabel('Частота')
+    axes[i].legend()
+
+plt.suptitle('Сравнение распределений: полный датасет vs goals > 100', y=1.02)
+plt.tight_layout()
+plt.savefig('changes.png', dpi=150)
+plt.show()
+
+for col in cols_to_compare:
+    print(f"{col}: медиана {skaters[col].median():.1f} -> {skaters_filtered[col].median():.1f}, "
+          f"std {skaters[col].std():.2f} -> {skaters_filtered[col].std():.2f}")
+
+# группировка по десятилетиям для обоих датасетов
+skater_grouped = skaters.groupby('decade')[['goals', 'assists', 'games']].mean().round(1)
+print(skater_grouped.sort_index())
+
+goalie_grouped = goalies.groupby('decade')[['wins', 'saves', 'games']].mean().round(1)
+print(goalie_grouped.sort_index())
+
+# категориальные признаки
+cat_cols = ['position', 'active', 'hof']
+for col in cat_cols:
+    print(f"{col}: {skaters[col].nunique()} значений -> {skaters[col].value_counts().to_dict()}")
+
+fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+
+top_pos = skaters['position'].value_counts().head(10)
+axes[0].bar(top_pos.index, top_pos.values, color='steelblue')
+axes[0].set_title('position (топ-10)')
+axes[0].tick_params(axis='x', rotation=45)
+
+active_counts = skaters['active'].map({1: 'Активен', 0: 'Не активен'}).value_counts()
+axes[1].bar(active_counts.index, active_counts.values, color=['green', 'gray'])
+axes[1].set_title('active')
+
+hof_counts = skaters['hof'].map({1: 'В Зале славы', 0: 'Не в Зале'}).value_counts()
+axes[2].bar(hof_counts.index, hof_counts.values, color=['gold', 'lightgray'])
+axes[2].set_title('hof')
+
+plt.tight_layout()
+plt.savefig('categorical_distributions.png', dpi=150)
+plt.show()
+
+# one-hot encoding для position
+dummies = pd.get_dummies(skaters['position_unified'], prefix='pos')
+skaters_encoded = pd.concat([skaters, dummies], axis=1)
+print(f"добавлено признаков: {len(dummies.columns)} -> {list(dummies.columns)}")
+
+# редкие категории (< 1%)
+pos_counts = skaters['position'].value_counts()
+rare_threshold = len(skaters) * 0.01
+rare_positions = pos_counts[pos_counts < rare_threshold].index.tolist()
+print(f"редкие позиции: {rare_positions}")
+
+print(skaters[skaters['position'].isin(rare_positions)][['goals', 'assists', 'games']].agg(['mean', 'min', 'max']).round(1))
+
+skaters['position_agg'] = skaters['position'].apply(
+    lambda x: 'Other' if x in rare_positions else x
+)
+print(skaters['position_agg'].value_counts())
+
+# новая категория: уровень результативности
+skaters['total_points'] = skaters['goals'] + skaters['assists']
+
+def assign_level(pts):
+    if pts < 100:
+        return 'Низкий'
+    elif pts < 500:
+        return 'Средний'
+    else:
+        return 'Высокий'
+
+skaters['performance_level'] = skaters['total_points'].apply(assign_level)
+for lvl, cnt in skaters['performance_level'].value_counts().items():
+    print(f"  {lvl}: {cnt} ({cnt/len(skaters)*100:.1f}%)")
+
+# сохраняем
+skaters.to_csv('skaters_processed.csv', index=False)
+goalies.to_csv('goalies_processed.csv', index=False)
